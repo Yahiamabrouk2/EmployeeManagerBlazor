@@ -1,0 +1,115 @@
+﻿@page "/employees/list"
+@page "/employees/list/{currentPage:int?}"
+@inject IDbContextFactory<EmployeeManagerDbContext> ContextFactory 
+@inject StateContainer StateContainer
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JS
+
+<PageTitle>Employees</PageTitle>
+
+<h1>Employees</h1>
+
+@if(Employees is null)
+{
+    <div>Loading...</div>
+}
+else
+{
+    <ul class="pagination mt-3">
+        <li class="page-item @(CurrentPage == 1 ? "disabled" :"")">
+            <a class="page-link" href="/employees/list/@(CurrentPage -1) ">Previeous</a>
+        </li>
+        @for (int i = 1; i <= TotalPages; i++)
+        {
+            <li class="page-item @(CurrentPage == i ? "active" :"")">
+                <a class="page-link" href="/employees/list/@i">@i</a>
+            </li>
+        }
+        <li class="page-item @(CurrentPage == TotalPages ? "disabled" :"")">
+            <a class="page-link" href="/employees/list/@(CurrentPage + 1) ">Next</a>
+        </li>
+    </ul>
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Firstname</th>
+                <th>Lastname</th>
+                <th>Is Developer</th>
+                <th>Department</th>
+                <th>#</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach(var employee in Employees)
+            {
+                <tr>
+                    <td>@employee.FirstName</td>
+                    <td>@employee.LastName</td>
+                    <td>@employee.IsDeveloper</td>
+                    <td>@employee.Department?.Name</td>
+                    <td class="btn-group-sm">
+                        <a href="/employee/edit/@employee.Id" class="btn btn-outline-primary">Edit</a>
+                        <button class="btn btn-outline-danger" @onclick="()=>HandleDelete(employee)">Delete</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    
+}
+
+@code{
+    [Parameter]
+    public int? CurrentPage{ get; set; }
+    private Employee[]? Employees { get; set; }
+    private int TotalPages{ get; set; } 
+    private const int ItemsPerPage = 4;
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadData();
+    }
+    private async Task LoadData(){
+        using var context = ContextFactory.CreateDbContext();        
+        if (CurrentPage is null or < 1)
+        {
+            NavigationManager.NavigateTo("/employees/list/1");
+            return;
+        }
+        var itemsToSkip = (CurrentPage.Value - 1) * ItemsPerPage;
+        var employeeCount = await context.Employees.CountAsync();
+        TotalPages = employeeCount == 0 ? 1 : (int)Math.Ceiling((double)employeeCount / ItemsPerPage);
+
+        if (CurrentPage > TotalPages)
+        {
+            NavigationManager.NavigateTo($"/employees/list/{TotalPages}");
+            return;
+        }
+        StateContainer.EmployeeOverviewPage = CurrentPage.Value;
+        Employees = await context.Employees
+        .Include(emp =>emp.Department)
+        .OrderBy(emp =>emp.FirstName)
+        .Skip(itemsToSkip)
+        .Take(ItemsPerPage)
+        .ToArrayAsync();
+    }
+
+    private async Task HandleDelete(Employee employee)
+    {
+        var isOk = await JS.InvokeAsync<bool>("confirm", $"Delete employee {employee.FirstName} {employee.LastName}?");
+        using var context = ContextFactory.CreateDbContext();
+        if (isOk)
+        {
+            try{
+                context.Employees.Remove(employee);
+                await context.SaveChangesAsync();
+            }
+            catch(DbUpdateConcurrencyException)
+            {
+                
+            }
+            await LoadData();
+        }
+    
+    }
+}
